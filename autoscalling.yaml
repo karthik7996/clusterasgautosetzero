@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Lambda function to set the cluster auto scalling group to zero.
+Transform: AWS::Serverless-2016-10-31
+Metadata:
+  Version: ' 1.0.1'
+  LastEditedBy: Sreekanth Reddy
+  LastEditedOn: 29/11/2021
+  LastEdit: Add Lambda env variables and Start/StopTime parameters
+  Unimplemented Resources: {}
+Parameters:
+  LambdaName:
+    Description: Tenant
+    Type: String
+    Default: ClusterAsgUpdateFunction
+  EventRuleName:
+    Description: Tenant
+    Type: String
+    Default: ClusterAsgUpdateEventRule
+  Autoscallinggroupname:
+    Description: Enter auto scalling group name which is going to set zero.
+    Type: String
+    Default: eks-node-grp-2-1cc16a2e-ac43-de5f-a304-e596001e6b45
+  StopTime:
+    Description: Time to start instances (UTC)
+    Type: String
+    Default: "17"
+  SlackUrl:
+    Description: enter slack webhook to receive alerts
+    Type: String
+    Default:  https://hooks.slack.com/services/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
+  TeamsUrl:
+    Description: enter teams webhook to receive alerts
+    Type: String
+    Default: https://cloudzenix.webhook.office.com/webhookb2/6b3ba5ea-708c-4629-9f20-7c1b09d46619@0ca8b1bf-7c75-4720-85bf-8569448da8a3/IncomingWebhook/f16a9d9f437c4b32b5d290dd3e529a72/e6dbaf6f-fc1e-47ac-b2cd-b59a44638d22
+   
+Resources:
+  AsgSetFunction:
+    Type: AWS::Serverless::Function
+    Description: Lambda function to update the cluster auto scalling group to zero at every day 11:10 PM
+    Properties:
+      FunctionName: !Ref LambdaName
+      Timeout: 900
+      MemorySize: 1024
+      Runtime: python3.8
+      CodeUri: ./lambda/autoscaling.py
+      Handler: autoscaling.lambda_handler
+      Role: !GetAtt AsglambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          slack_url: !Ref SlackUrl
+          teams_url: !Ref TeamsUrl
+          asg_name: !Ref Autoscallinggroupname
+
+  AsglambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition: {}
+      Path: /service-role/
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: ClusterAsgUpdatePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: ForEC2
+                Action:
+                  - 'autoscaling:UpdateAutoScalingGroup'
+                Effect: Allow
+                Resource: '*'
+  AsgSetZeroEventRule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Name: !Ref EventRuleName
+      Description: Daily execution of Start EC2 Function
+      ScheduleExpression: !Sub cron(40 ${StopTime} ? * MON-FRI *)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt 
+            - AsgSetFunction
+            - Arn
+          Id: EventBridgeLambdaTarget
+  AsgSetExecutionPermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:invokeFunction'
+      FunctionName: !Ref AsgSetFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt 
+        - AsgSetZeroEventRule
+        - Arn
+  
